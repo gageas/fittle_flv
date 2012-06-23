@@ -1,0 +1,26 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 10.00
+# Visual C++ Express 2008
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "fittle_flv", "fittle_flv\fittle_flv.vcproj", "{5423CBC8-FDF9-4C2A-98CC-FC6AF110E363}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug Unicode|Win32 = Debug Unicode|Win32
+		Debug|Win32 = Debug|Win32
+		Release Unicode|Win32 = Release Unicode|Win32
+		Release|Win32 = Release|Win32
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{5423CBC8-FDF9-4C2A-98CC-FC6AF110E363}.Debug Unicode|Win32.ActiveCfg = Debug Unicode|Win32
+		{5423CBC8-FDF9-4C2A-98CC-FC6AF110E363}.Debug Unicode|Win32.Build.0 = Debug Unicode|Win32
+		{5423CBC8-FDF9-4C2A-98CC-FC6AF110E363}.Debug|Win32.ActiveCfg = Debug|Win32
+		{5423CBC8-FDF9-4C2A-98CC-FC6AF110E363}.Debug|Win32.Build.0 = Debug|Win32
+		{5423CBC8-FDF9-4C2A-98CC-FC6AF110E363}.Release Unicode|Win32.ActiveCfg = Release Unicode|Win32
+		{5423CBC8-FDF9-4C2A-98CC-FC6AF110E363}.Release Unicode|Win32.Build.0 = Release Unicode|Win32
+		{5423CBC8-FDF9-4C2A-98CC-FC6AF110E363}.Release|Win32.ActiveCfg = Release|Win32
+		{5423CBC8-FDF9-4C2A-98CC-FC6AF110E363}.Release|Win32.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

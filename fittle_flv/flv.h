@@ -7,9 +7,12 @@ BOOL FlvReadTag(FLVFILE flvfile,void* buffer,DWORD bufsize,LPDWORD read,LPDWORD 
 BOOL FlvSeekNextTag(FLVFILE flvfile);
 BOOL FlvSeekPrevTag(FLVFILE flvfile);
 BOOL FlvSeekHeadTag(FLVFILE flvfile);
+BOOL FlvSeekForcePos(FLVFILE flvfile,DWORD pos);
 DWORD FlvGetPos(FLVFILE flvfile);
 DWORD FlvGetFileSize(FLVFILE flvfile,LPDWORD lpFileSizeHigh);
 BOOL FlvGetFiletime(FLVFILE flvfile,FILETIME* ft);
+void FlvExtendBufferSize(FLVFILE flvfile);
+void FlvShrinkBufferSize(FLVFILE flvfile);
 
 #define BUFSIZE 1024
 

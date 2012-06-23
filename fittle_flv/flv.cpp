@@ -1,6 +1,7 @@
 #include <windows.h>
 #include "flv.h"
 
+
 FLVFILE FlvOpenFile(LPWSTR filename){
 	HANDLE hFile;
 	BYTE FlvHeaderBuf[FLV_HEADER_SIZE];
@@ -15,7 +16,7 @@ FLVFILE FlvOpenFile(LPWSTR filename){
 	if(FlvHeaderBuf[3] != FLV_HEADER_VERSION){return NULL;}
 	// End of Validation.
 
-	TFlvFile* flvfile = (TFlvFile*)HeapAlloc(GetProcessHeap(),0,sizeof(TFlvFile));
+	TFlvFile* flvfile = (TFlvFile*)HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sizeof(TFlvFile));
 	if(flvfile == NULL){
 		return NULL;
 	}
@@ -61,7 +62,6 @@ BOOL FlvHasVideo(FLVFILE flvfile){
 	tflvfile = (TFlvFile*)flvfile;
 	return (tflvfile->Header.TypeFlags & FLV_HEADER_TYPE_FLAG_VIDEO);
 }
-
 void UpdateBuffer(TFlvFile* file,DWORD Apos){
 	file->Apos = SetFilePointer(file->hFile,Apos,0,FILE_BEGIN);
 	DWORD read=0;
@@ -73,28 +73,28 @@ void UpdateBuffer(TFlvFile* file,DWORD Apos){
 	file->Bpos = 0;
 }
 
-// if buffer == NULL, only get TagSize
+BOOL setBufferSize(TFlvFile* file,DWORD newBufSize){
+	file->buffer = (BYTE*)HeapReAlloc(GetProcessHeap(),0,file->buffer,newBufSize);
+	file->bufsize = newBufSize;
+	if(file->buffer == NULL){
+		return FALSE;
+	}
+	UpdateBuffer(file,file->Apos);
+	return TRUE;
+}
+
+// if buffer == NULL, only get TagSize(in `read') and TagType
 BOOL FlvReadTag(FLVFILE flvfile,void* buffer,DWORD bufsize,LPDWORD read,LPDWORD TagType){
 	TFlvFile* file = (TFlvFile*)flvfile;
 	unsigned long previousTagSize;
 	unsigned long currentDataSize;
 	if(file->buflen <= (file->Bpos+4+11)){ // PreviousTagSizeが4バイト、TagHeaderが11バイト。それより大きいバッファがなければうｐだて
 		UpdateBuffer(file,file->Apos);
-		if(file->buflen <= (file->Bpos+4+11)){read=0;
+		if(file->buflen <= (file->Bpos+4+11)){*read=0;
 		return FALSE;} // failed.またはファイル終端
 	}
 	previousTagSize = UI32TOLONG(file->buffer+file->Bpos);
 	currentDataSize = UI24TOLONG(file->buffer+file->Bpos+5);
-
-	if(currentDataSize + 4 + 11 > file->bufsize){
-		DWORD newBufSize = currentDataSize+4+11+BUFSIZE;
-		file->buffer = (BYTE*)HeapReAlloc(GetProcessHeap(),0,file->buffer,newBufSize);
-		file->bufsize = newBufSize;
-		if(file->buffer == NULL){
-			return FALSE;
-		}
-		UpdateBuffer(file,file->Apos);
-	}
 
 	if(TagType){*TagType = *(file->buffer+file->Bpos+4);}
 	if(read){*read = currentDataSize;}
@@ -103,10 +103,15 @@ BOOL FlvReadTag(FLVFILE flvfile,void* buffer,DWORD bufsize,LPDWORD read,LPDWORD 
 		return TRUE;
 	}
 
+	if(currentDataSize + 4 + 11 > file->bufsize){
+		DWORD newBufSize = currentDataSize+4+11+BUFSIZE;
+		if(setBufferSize(file,newBufSize) == FALSE)return FALSE;
+	}
+
 	if(bufsize < currentDataSize){if(read){*read = 0;}return FALSE;}
 	if(file->buflen <= (file->Bpos+4+11+currentDataSize)){ // no enought prebuf 
 		UpdateBuffer(file,file->Apos);
-		if(file->buflen <= (file->Bpos+4+11+currentDataSize)){read=0;
+		if(file->buflen <= (file->Bpos+4+11+currentDataSize)){*read=0;
 		return FALSE;} // cannot prebuf
 	}
 	memcpy(buffer,file->buffer+file->Bpos+4+11,currentDataSize);
@@ -124,13 +129,21 @@ BOOL FlvSeekNextTag(FLVFILE flvfile){
 	currentDataSize = UI24TOLONG(file->buffer+file->Bpos+5);
 
 	if(file->buflen <= (file->Bpos+4+11+currentDataSize)){ // no enought prebuf 
-		UpdateBuffer(file,file->Apos);
-		if(file->buflen <= (file->Bpos+4+11+currentDataSize)){return FALSE;} // cannot prebuf
+		UpdateBuffer(file,file->Apos+4+11+currentDataSize);
+		file->Bpos=0;
+		return TRUE;
+//		if(file->buflen <= (file->Bpos+4+11+currentDataSize)){return FALSE;} // cannot prebuf
 	}
 	file->Bpos+=4+11+currentDataSize;
 	file->Apos+=4+11+currentDataSize;
 
 	return TRUE;
+}
+
+BOOL FlvSeekForcePos(FLVFILE flvfile,DWORD pos){
+	TFlvFile* file = (TFlvFile*)flvfile;
+	UpdateBuffer(file,pos);
+	return true;
 }
 
 BOOL FlvSeekPrevTag(FLVFILE flvfile){
@@ -154,5 +167,15 @@ BOOL FlvSeekHeadTag(FLVFILE flvfile){
 }
 DWORD FlvGetPos(FLVFILE flvfile){
 	TFlvFile* file = (TFlvFile*)flvfile;
-	return file->Apos+file->Bpos;
+	return file->Apos;
+}
+
+void FlvExtendBufferSize(FLVFILE flvfile){
+	TFlvFile* file = (TFlvFile*)flvfile;
+	setBufferSize(file,BUFSIZE*32);
+}
+
+void FlvShrinkBufferSize(FLVFILE flvfile){
+	TFlvFile* file = (TFlvFile*)flvfile;
+	setBufferSize(file,BUFSIZE);
 }
