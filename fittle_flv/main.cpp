@@ -1,7 +1,9 @@
 
+#include <windows.h>
+#include <shlwapi.h>
+
 #include "aplugin.h"
 #include "flv.h"
-#include <shlwapi.h>
 
 #if defined(_MSC_VER)
 #ifdef UNICODE
@@ -40,91 +42,80 @@ static LPTSTR CALLBACK CheckArchivePath(LPTSTR pszFilePath){
 	return StrStrI(pszFilePath, TEXT(".flv/"));
 }
 
+typedef struct tagFLVFILEINFO{
+	DWORD dwAudioLength;	//audio合計サイズ
+	DWORD dwVideoLength;	//video合計サイズ
+}FLVFILEINFO,*LPFLVFILEINFO;
+void flvGetInfo(FLVFILE file, FLVFILEINFO *lpInfo)
+{
+	FlvSeekHeadTag(file);
+	do{
+		TFlvTag *FlvTag;
+		FlvTag = FlvGetFlvTag(file);
+		if(FlvTag==NULL)
+			break;
+		switch(FlvTag->TagType){
+			case FLV_BODY_TAG_TYPE_AUDIO:
+			{
+				BYTE *data;
+				BYTE AudioTagHeader;
+				BYTE SoundFormat;
+				DWORD DataSize = 0;
+				data = FlvGetTagData(file);
+				AudioTagHeader = data[0];
+				SoundFormat = AudioTagHeader & FLV_BODY_TAG_AUDIO_SOUND_FORMAT_MASK;
+				if(SoundFormat==FLV_BODY_TAG_AUDIO_SOUND_FORMAT_MP3){
+					if(FlvGetTagDataSize(file, &DataSize))
+						DataSize = DataSize-1;	//1=AudioTagHeader
+				}
+				else if(SoundFormat==FLV_BODY_TAG_AUDIO_SOUND_FORMAT_AAC){
+					BYTE AACPacketType;
+					AACPacketType = data[1];
+					if(AACPacketType==0){	//AACPacketType
+						//AAC sequence header
+						DataSize = 0;
+					}
+					else{
+						//AAC raw
+						if(FlvGetTagDataSize(file, &DataSize))
+							DataSize = 7+DataSize-1-1; //7=sizeof(adts) 1=AudioTagHeader 1=AACPacketType
+					}
+				}
+				else{
+					//?
+				}
+				lpInfo->dwAudioLength+=DataSize;
+				break;
+			}
+/*必要ないからコメントアウトしておく
+			case FLV_BODY_TAG_TYPE_VIDEO:
+			{
+				BYTE *data;
+				BYTE VideoTagHeader;
+				DWORD DataSize = 0;
+				data = FlvGetTagData(file);
+				VideoTagHeader = data[0];
+				FlvGetTagDataSize(file, &DataSize);
+				lpInfo->dwVideoLength+=DataSize;
+				break;
+			}
+			case FLV_BODY_TAG_TYPE_SCRIPT:
+				break;
+			default:
+				break;
+*/
+		}
+	}while(FlvSeekNextTag(file));
+}
+
 static BOOL CALLBACK EnumArchive(LPTSTR pszFilePath,LPFNARCHIVEENUMPROC lpfnProc,void *pData){
 	FLVFILE file;
-	DWORD tagType;
-	DWORD read;
-	BYTE* tagBuf;
-	BYTE audioTagFlag;
-	TCHAR virtualFilename[MAX_PATH+1];
-	int cnt = 0;
 	// アーカイブをオープン
 #ifdef UNICODE
 	file = FlvOpenFile(pszFilePath);
-	lstrcpy(virtualFilename,pszFilePath);
-	if(PathFindExtension(virtualFilename)){ // 拡張子の直前でカット 後でmp3かaacを付ける
-		*(PathFindExtension(virtualFilename)) = '\0';
-	}
 #else
 	wchar_t nameW[MAX_PATH + 1];
-	MultiByteToWideChar(CP_ACP,0,pszFilePath,-1,nameW,MAX_PATH+1);
-	file = FlvOpenFile(nameW);
-	lstrcpy(virtualFilename,pszFilePath);
-	if(PathFindExtension(virtualFilename)){
-		*(PathFindExtension(virtualFilename)) = '\0';
-	}
-#endif
-	if(!file){
-		return FALSE;
-	}
-	if(!FlvHasAudio(file)){FlvCloseFile(file);return FALSE;} // NOT include audio track
-	
-
-	FILETIME ft = {0,0};
-	FlvGetFiletime(file,&ft);
-	while(1){ // audio tagが見つかるまで探す
-		cnt++;
-		if(cnt == 100){Sleep(1);cnt=0;}
-		if(FlvReadTag(file,NULL,0,&read,&tagType) == FALSE){break;}
-		if(tagType != FLV_BODY_TAG_TYPE_AUDIO){
-			if(FlvSeekNextTag(file)==FALSE){break;}
-			continue;
-		}
-
-		// on found audio tag
-		tagBuf = (BYTE*)HeapAlloc(GetProcessHeap(),0,read);
-		if(tagBuf == NULL){break;}
-		FlvReadTag(file,tagBuf,read,&read,&tagType);
-
-		audioTagFlag = tagBuf[0] & FLV_BODY_TAG_AUDIO_SOUND_FORMAT_MASK;
-		HeapFree(GetProcessHeap(),0,tagBuf);
-		FlvCloseFile(file);
-
-		switch(audioTagFlag){
-			case FLV_BODY_TAG_AUDIO_SOUND_FORMAT_AAC:
-				StrCat(virtualFilename,EXT_AAC);
-				break;
-			case FLV_BODY_TAG_AUDIO_SOUND_FORMAT_MP3:
-				StrCat(virtualFilename,EXT_MP3);
-				break;
-			default:
-				return FALSE; // failed.
-				break;
-		}
-		lpfnProc(virtualFilename,FlvGetFileSize(file,NULL),ft,pData); // success
-		return TRUE;
-	}
-	// failed.
-	FlvCloseFile(file);
-	return FALSE;
-}
-
-static BOOL CALLBACK ExtractArchive(LPTSTR pszArchivePath, LPTSTR pszFileName, void **ppBuf, DWORD *pSize){
-	FLVFILE file;
-	DWORD dwBufferSize;
-	DWORD dwTagBodySize;
-	DWORD dwTagType;
-	BYTE* TagBuf;
-	BYTE* bufPtr;
-	DWORD SoundFormat = 0;
-	DWORD SoundRate = 0;
-	DWORD SoundType = 0;
-	// アーカイブをオープン
-#ifdef UNICODE
-	file = FlvOpenFile(pszArchivePath);
-#else
-	wchar_t nameW[MAX_PATH + 1];
-	MultiByteToWideChar(CP_ACP,0,pszArchivePath,-1,nameW,MAX_PATH+1);
+	MultiByteToWideChar(CP_ACP, 0, pszFilePath, -1, nameW, MAX_PATH+1);
 	file = FlvOpenFile(nameW);
 #endif
 	if(!file){
@@ -134,121 +125,195 @@ static BOOL CALLBACK ExtractArchive(LPTSTR pszArchivePath, LPTSTR pszFileName, v
 		FlvCloseFile(file);
 		return FALSE;
 	}
-	dwBufferSize = FlvGetFileSize(file,NULL);
-	*ppBuf = bufPtr = (LPBYTE)HeapAlloc(GetProcessHeap(), /*HEAP_ZERO_MEMORY*/0, dwBufferSize);
+	//最初のAudioTagHeaderを取得する
+	BYTE AudioTagHeader = 0;
+	FlvSeekHeadTag(file);
+	do{
+		TFlvTag *FlvTag;
+		FlvTag = FlvGetFlvTag(file);
+		if(FlvTag==NULL)
+			break;
+		if(FlvTag->TagType==FLV_BODY_TAG_TYPE_AUDIO){
+			BYTE *data;
+			data = FlvGetTagData(file);
+			AudioTagHeader = data[0];
+			break;
+		}
+	}while(FlvSeekNextTag(file));
+	if(AudioTagHeader==0){
+		FlvCloseFile(file);
+		return FALSE;
+	}
+	//サウンドフォーマット
+	DWORD SoundFormat = 0;
+	SoundFormat = AudioTagHeader & FLV_BODY_TAG_AUDIO_SOUND_FORMAT_MASK;
+	//更新日時
+	FILETIME ft = {0,0};
+	FlvGetFiletime(file, &ft);
+
+	FlvCloseFile(file);
+
+	TCHAR virtualFilename[MAX_PATH+1];
+	lstrcpy(virtualFilename, PathFindFileName(pszFilePath));
+	if(PathFindExtension(virtualFilename))
+		*(PathFindExtension(virtualFilename)) = '\0';
+
+	switch(SoundFormat){
+		case FLV_BODY_TAG_AUDIO_SOUND_FORMAT_AAC:
+			lstrcat(virtualFilename, EXT_AAC);
+			break;
+		case FLV_BODY_TAG_AUDIO_SOUND_FORMAT_MP3:
+			lstrcat(virtualFilename, EXT_MP3);
+			break;
+		default:
+			return FALSE;
+	}
+	lpfnProc(virtualFilename, FlvGetFileSize(file, NULL), ft, pData);
+	return TRUE;
+}
+
+static BOOL CALLBACK ExtractArchive(LPTSTR pszArchivePath, LPTSTR pszFileName, void **ppBuf, DWORD *pSize){
+	FLVFILE file;
+	// アーカイブをオープン
+#ifdef UNICODE
+	file = FlvOpenFile(pszArchivePath);
+#else
+	wchar_t nameW[MAX_PATH + 1];
+	MultiByteToWideChar(CP_ACP, 0, pszArchivePath, -1, nameW, MAX_PATH+1);
+	file = FlvOpenFile(nameW);
+#endif
+	if(!file){
+		return FALSE;
+	}
+	if(!FlvHasAudio(file)){
+		FlvCloseFile(file);
+		return FALSE;
+	}
+	//最初のAudioTagHeaderを取得する
+	BYTE AudioTagHeader = 0;
+	FlvSeekHeadTag(file);
+	do{
+		TFlvTag *FlvTag;
+		FlvTag = FlvGetFlvTag(file);
+		if(FlvTag==NULL)
+			break;
+		if(FlvTag->TagType==FLV_BODY_TAG_TYPE_AUDIO){
+			BYTE *data;
+			data = FlvGetTagData(file);
+			AudioTagHeader = data[0];
+			break;
+		}
+	}while(FlvSeekNextTag(file));
+	if(AudioTagHeader==0){
+		FlvCloseFile(file);
+		return FALSE;
+	}
+	//サウンドフォーマット
+	DWORD SoundFormat = 0;
+	SoundFormat = AudioTagHeader & FLV_BODY_TAG_AUDIO_SOUND_FORMAT_MASK;
+	if(SoundFormat==FLV_BODY_TAG_AUDIO_SOUND_FORMAT_MP3 ||
+		SoundFormat==FLV_BODY_TAG_AUDIO_SOUND_FORMAT_AAC){
+		//ok
+	}
+	else{
+		FlvCloseFile(file);
+		return FALSE;
+	}
+
+	FLVFILEINFO info = {0};
+	flvGetInfo(file, &info);
+
+	BYTE* bufPtr;
+	*ppBuf = bufPtr = (LPBYTE)HeapAlloc(GetProcessHeap(), /*HEAP_ZERO_MEMORY*/0, info.dwAudioLength);
 	if(bufPtr == NULL){
 		FlvCloseFile(file);
 		return FALSE;
 	}
 	*pSize = 0;
 
-	while(1){
-		//タグサイズとタグタイプを取得
-		dwTagBodySize=0;
-		dwTagType=0;
-		if(FlvReadTag(file,NULL,0,&dwTagBodySize,&dwTagType) == FALSE) // get tag size and tag type
+	int profile = 0;
+	int samplingrateindex = 0;
+	int channels = 0;
+
+	FlvSeekHeadTag(file);
+	do{
+		TFlvTag *FlvTag;
+		FlvTag = FlvGetFlvTag(file);
+		if(FlvTag==NULL)
 			break;
-		if(dwTagType != FLV_BODY_TAG_TYPE_AUDIO){ // not audio tag
-			if(FlvSeekNextTag(file) == FALSE)
-				break;
-			continue;
+		if(FlvTag->TagType==FLV_BODY_TAG_TYPE_AUDIO){
+			BYTE *data;
+			BYTE AudioTagHeader;
+			DWORD SoundFormat = 0;
+			DWORD DataSize;
+			data = FlvGetTagData(file);
+			AudioTagHeader = data[0];
+			SoundFormat = AudioTagHeader & FLV_BODY_TAG_AUDIO_SOUND_FORMAT_MASK;
+			FlvGetTagDataSize(file, &DataSize);
+			if(SoundFormat==FLV_BODY_TAG_AUDIO_SOUND_FORMAT_MP3){
+				int offset = 1;	//1=AudioTagHeader
+				memcpy(bufPtr, data+offset, DataSize-offset);
+				*pSize = *pSize + DataSize -offset;
+				bufPtr += DataSize -offset;
+			}
+			else if(SoundFormat==FLV_BODY_TAG_AUDIO_SOUND_FORMAT_AAC){
+				BYTE AACPacketType;
+				AACPacketType = data[1];
+				if(AACPacketType==0){
+					//AAC sequence header
+					WORD flag;
+					flag = data[2]<<8|data[3];
+					profile = ((flag&0xF800)>>11)-1;	//0x00:MAIN 0x01:LC 0x10:SSR 0x11:(reserved)
+					samplingrateindex = ((flag&0x0780)>>7);
+					channels = ((flag&0x0078)>>3);
+				}
+				else{
+					//AAC raw
+					BYTE adts[7] = {0};
+					int id;
+					int layer;
+					int protection;
+					int privatebit = 0;
+					int length;
+					int offset = 2;	//2=AudioTagHeader+AACPacketType
+
+					//ADTS作成
+					//参考 "ADTS aac","WriteADTSHeader"でググる
+					id = 0;	//0:mpeg4 1:mpeg2
+					layer = 0;	//allways 0
+					protection = 1;
+					length = 7+DataSize-offset;
+
+					adts[0] = 0xff;
+					adts[1] = 0xf0 | ((id&0x01)<<3) | ((layer&0x03)<<1) | (protection&0x01);
+					adts[2] = ((profile&0x03)<<6) | ((samplingrateindex&0x0F)<<2) | ((privatebit&0x01)<<1) | ((channels&0x07)>>2);
+					adts[3] = ((channels&0x07)<<6) | (length>>11)&0xFF;
+					adts[4] = (length>>3)&0xFF;
+					adts[5] = (length<<5)&0xFF | 0x1f;
+					adts[6] = 0xfc;
+
+					//ADTS
+					memcpy(bufPtr, adts, sizeof(adts));
+					*pSize = *pSize + sizeof(adts);
+					bufPtr += sizeof(adts);
+
+					//タグ
+					memcpy(bufPtr, data+offset, DataSize-offset);
+					*pSize = *pSize + DataSize -offset;
+					bufPtr += DataSize -offset;
+				}
+			}
 		}
-		TagBuf = (BYTE*)HeapAlloc(GetProcessHeap(),0,dwTagBodySize);
-		if(TagBuf == NULL){
-			HeapFree(GetProcessHeap(),0,*ppBuf);
-			*ppBuf = NULL;
-			*pSize = 0;
-			FlvCloseFile(file);
-			return FALSE;
-		}
-		//タグを取得
-		if(FlvReadTag(file,TagBuf,dwTagBodySize,&dwTagBodySize,&dwTagType) == FALSE){ // read tag
-			HeapFree(GetProcessHeap(),0,TagBuf);
-			TagBuf = NULL;
-			break;
-		}
-		//SoundFormat、SoundRate、SoundTypeを取得
-		if(SoundFormat==0){
-			SoundFormat = TagBuf[0] & FLV_BODY_TAG_AUDIO_SOUND_FORMAT_MASK;
-			SoundRate   = TagBuf[0] & FLV_BODY_TAG_AUDIO_SOUND_RATE_MASK;
-			SoundType   = TagBuf[0] & FLV_BODY_TAG_AUDIO_SOUND_TYPE_MASK;
-/*
-			if(SoundFormat==FLV_BODY_TAG_AUDIO_SOUND_FORMAT_MP3)
-				OutputDebugStr(TEXT("FLV_BODY_TAG_AUDIO_SOUND_FORMAT_MP3\n"));
-			else if(SoundFormat==FLV_BODY_TAG_AUDIO_SOUND_FORMAT_AAC)
-				OutputDebugStr(TEXT("FLV_BODY_TAG_AUDIO_SOUND_FORMAT_AAC\n"));
-			else
-				OutputDebugStr(TEXT("FLV_BODY_TAG_AUDIO_SOUND_FORMAT_???\n"));
-
-			if(SoundRate==FLV_BODY_TAG_AUDIO_SOUND_RATE_55)
-				OutputDebugStr(TEXT("FLV_BODY_TAG_AUDIO_SOUND_RATE_55\n"));
-			else if(SoundRate==FLV_BODY_TAG_AUDIO_SOUND_RATE_11)
-				OutputDebugStr(TEXT("FLV_BODY_TAG_AUDIO_SOUND_RATE_11\n"));
-			else if(SoundRate==FLV_BODY_TAG_AUDIO_SOUND_RATE_22)
-				OutputDebugStr(TEXT("FLV_BODY_TAG_AUDIO_SOUND_RATE_22\n"));
-			else if(SoundRate==FLV_BODY_TAG_AUDIO_SOUND_RATE_44)
-				OutputDebugStr(TEXT("FLV_BODY_TAG_AUDIO_SOUND_RATE_44\n"));
-
-			if(SoundType==FLV_BODY_TAG_AUDIO_SOUND_TYPE_MONO)
-				OutputDebugStr(TEXT("FLV_BODY_TAG_AUDIO_SOUND_TYPE_MONO\n"));
-			else if(SoundType==FLV_BODY_TAG_AUDIO_SOUND_TYPE_STEREO)
-				OutputDebugStr(TEXT("FLV_BODY_TAG_AUDIO_SOUND_TYPE_STEREO\n"));
-*/
-		}
-
-		if(SoundFormat==FLV_BODY_TAG_AUDIO_SOUND_FORMAT_MP3 && dwTagBodySize>0){
-			int offset=1;
-			memcpy(bufPtr,TagBuf+offset,dwTagBodySize-offset);
-			*pSize = *pSize + dwTagBodySize -offset;
-			bufPtr += dwTagBodySize -offset;
-		}
-		else if(SoundFormat==FLV_BODY_TAG_AUDIO_SOUND_FORMAT_AAC && dwTagBodySize!=4){
-			BYTE adts[7] = {0};
-			int id;
-			int layer;
-			int protection;
-			int profile;
-			int samplingrateindex = 0;
-			int privatebit = 0;
-			int channels = 0;
-			int length;
-			int offset=2;
-
-			//ADTS作成
-			//参考 "ADTS aac","WriteADTSHeader"でググる
-			id = 0;	//0:mpeg4 1:mpeg2
-			layer = 0;	//allways 0
-			protection = 1;
-			profile = 0x01;	//0x00:MAIN 0x01:LC 0x10:SSR 0x11:(reserved)
-			if(SoundRate==FLV_BODY_TAG_AUDIO_SOUND_RATE_55) samplingrateindex = 11;	//800   hz
-			if(SoundRate==FLV_BODY_TAG_AUDIO_SOUND_RATE_11) samplingrateindex = 10;	//11025 hz
-			if(SoundRate==FLV_BODY_TAG_AUDIO_SOUND_RATE_22) samplingrateindex = 7;	//22050 hz
-			if(SoundRate==FLV_BODY_TAG_AUDIO_SOUND_RATE_44) samplingrateindex = 4;	//44100 hz
-			if(SoundType==FLV_BODY_TAG_AUDIO_SOUND_TYPE_MONO) channels = 1;
-			if(SoundType==FLV_BODY_TAG_AUDIO_SOUND_TYPE_STEREO) channels = 2;
-			length = 7+dwTagBodySize-offset;
-
-			adts[0] = 0xff;
-			adts[1] = 0xf0 | ((id&0x01)<<3) | ((layer&0x03)<<1) | (protection&0x01);
-			adts[2] = ((profile&0x03)<<6) | ((samplingrateindex&0x0F)<<2) | ((privatebit&0x01)<<1) | ((channels&0x07)>>2);
-			adts[3] = ((channels&0x07)<<6) | (length>>11)&0xFF;
-			adts[4] = (length>>3)&0xFF;
-			adts[5] = (length<<5)&0xFF | 0x1f;
-			adts[6] = 0xfc;
-
-			//ADTS
-			memcpy(bufPtr,adts,7);
-			*pSize = *pSize + 7;
-			bufPtr += 7;
-
-			//タグ
-			memcpy(bufPtr,TagBuf+offset,dwTagBodySize-offset);
-			*pSize = *pSize + dwTagBodySize -offset;
-			bufPtr += dwTagBodySize -offset;
-		}
-		HeapFree(GetProcessHeap(),0,TagBuf);
-	}
+	}while(FlvSeekNextTag(file));
 	FlvCloseFile(file);
+	if(0){
+		//抽出した音声データをファイルに保存してみる
+		HANDLE hFile;
+		DWORD cbWrite = 0;
+		hFile = CreateFile(TEXT("plugins\\fap\\output.mp3"), GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+		WriteFile(hFile, *ppBuf, *pSize, &cbWrite, NULL);
+		CloseHandle(hFile);
+	}
 	return TRUE;
 }
 
@@ -264,6 +329,9 @@ static ARCHIVE_PLUGIN_INFO apinfo = {
 
 #ifdef __cplusplus
 extern "C"
+#endif
+#ifdef __MINGW32__
+__declspec(dllexport)
 #endif
 ARCHIVE_PLUGIN_INFO * CALLBACK GetAPluginInfo(void)
 {

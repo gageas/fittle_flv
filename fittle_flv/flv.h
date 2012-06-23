@@ -1,18 +1,3 @@
-typedef void *FLVFILE;
-FLVFILE FlvOpenFile(LPWSTR filename);
-void FlvCloseFile(FLVFILE flvfile);
-BOOL FlvHasAudio(FLVFILE flvfile);
-BOOL FlvHasVideo(FLVFILE flvfile);
-BOOL FlvReadTag(FLVFILE flvfile,void* buffer,DWORD bufsize,LPDWORD read,LPDWORD TagType);
-BOOL FlvSeekNextTag(FLVFILE flvfile);
-BOOL FlvSeekPrevTag(FLVFILE flvfile);
-BOOL FlvSeekHeadTag(FLVFILE flvfile);
-BOOL FlvSeekForcePos(FLVFILE flvfile,DWORD pos);
-DWORD FlvGetPos(FLVFILE flvfile);
-DWORD FlvGetFileSize(FLVFILE flvfile,LPDWORD lpFileSizeHigh);
-BOOL FlvGetFiletime(FLVFILE flvfile,FILETIME* ft);
-void FlvExtendBufferSize(FLVFILE flvfile);
-void FlvShrinkBufferSize(FLVFILE flvfile);
 
 #define BUFSIZE 1024
 
@@ -60,43 +45,46 @@ void FlvShrinkBufferSize(FLVFILE flvfile);
 #define FLV_BODY_TAG_AUDIO_SOUND_TYPE_MONO      0x00
 #define FLV_BODY_TAG_AUDIO_SOUND_TYPE_STEREO    0x01
 
-typedef struct{
+typedef void* FLVFILE;
+
+typedef struct _TFlvHeader{
 	unsigned char Version;
 	unsigned char TypeFlags;
 	unsigned long DataOffset;
 } TFlvHeader;
 
-typedef BYTE* TFlvData;
+typedef struct _TFlvFile{
+	HANDLE hFile;
+	DWORD dwFileSize;
+	HANDLE hMapFile;
+	BYTE *lpMapViewOfFile;
+	TFlvHeader Header;
+	DWORD pos;
+} TFlvFile;
 
-typedef TFlvData TFlvAudioData;
-typedef TFlvData TFlvVideoData;
+typedef BYTE* TFlvData;
 
 typedef struct _TFlvTag{
 	unsigned char TagType;
-	unsigned long DataSize;
-	unsigned long Timestamp;
+	unsigned char DataSize[3];
+	unsigned char Timestamp[3];
 	unsigned char TimestampExtended;
-	unsigned long StreamID;
-	TFlvData Data;
+	unsigned char StreamID[3];
 } TFlvTag;
 
-typedef struct{
-	TFlvTag Tag;
-	unsigned long TagSize;
+FLVFILE FlvOpenFile(LPWSTR filename);
+void FlvCloseFile(FLVFILE flvfile);
+BOOL FlvHasAudio(FLVFILE flvfile);
+BOOL FlvHasVideo(FLVFILE flvfile);
+BOOL FlvReadTag(FLVFILE flvfile,void* buffer,DWORD bufsize,LPDWORD read,LPDWORD TagType);
+BOOL FlvSeekNextTag(FLVFILE flvfile);
+BOOL FlvSeekPrevTag(FLVFILE flvfile);
+BOOL FlvSeekHeadTag(FLVFILE flvfile);
+BOOL FlvSeekForcePos(FLVFILE flvfile,DWORD pos);
+DWORD FlvGetPos(FLVFILE flvfile);
+DWORD FlvGetFileSize(FLVFILE flvfile,LPDWORD lpFileSizeHigh);
+BOOL FlvGetFiletime(FLVFILE flvfile,FILETIME* ft);
 
-} TFlvBody;
-
-typedef struct{
-	HANDLE hFile;
-	// pos are always offset Head-Byte of PreviousTagLength field.
-	DWORD Apos; // absolute pos
-	DWORD Bpos; // pos in buffer
-
-	DWORD buflen; // buffer length in used
-	DWORD bufsize; // buffer length allocated
-	BYTE* buffer;
-
-	TFlvHeader Header;
-//	long TagsCount;
-//	TFlvTag* BodyTags;
-} TFlvFile;
+TFlvTag* FlvGetFlvTag(FLVFILE flvfile);
+BOOL FlvGetTagDataSize(FLVFILE flvfile, LPDWORD DataSize);
+BYTE* FlvGetTagData(FLVFILE flvfile);
